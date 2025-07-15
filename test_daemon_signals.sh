@@ -15,7 +15,7 @@ go build
 
 # Start daemon in background
 echo "Starting daemon in dry-run mode..."
-timeout 20s ./peter -daemon -dry-run &
+timeout 20s ./automagic -daemon -dry-run &
 DAEMON_PID=$!
 
 # Wait a bit for daemon to start

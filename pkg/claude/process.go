@@ -120,9 +120,13 @@ func extractSessionIDFromText(text string) string {
 	return ""
 }
 
-// ensureRepositoryExists checks if the repository exists locally and clones it if needed
-// Returns: (repoPath, wasCloned, error)
-func ensureRepositoryExists(projectPath string, gitlabURL string, dryRun bool) (string, bool, error) {
+func ensureRepositoryExistsWithProvider(
+	projectPath string,
+	providerURL string,
+	providerType string,
+	dryRun bool,
+) (string, bool, error) {
+	fmt.Println("Ensuring repository exists with provider:", providerType)
 	// Extract project name from path (e.g., "vbi/backend/vb_integration" -> "vb_integration")
 	pathParts := strings.Split(projectPath, "/")
 	if len(pathParts) == 0 {
@@ -155,17 +159,36 @@ func ensureRepositoryExists(projectPath string, gitlabURL string, dryRun bool) (
 	}
 
 	// Repository doesn't exist, need to clone
+	var cloneURL string
+
+	// Construct clone URL based on provider type
+	switch strings.ToLower(providerType) {
+	case "github":
+		// GitHub clone URL format: https://github.com/owner/repo.git
+		if strings.Contains(providerURL, "api.github.com") {
+			// Convert API URL to web URL
+			cloneURL = fmt.Sprintf("https://github.com/%s.git", projectPath)
+		} else {
+			// Assume it's already a web URL
+			cloneURL = fmt.Sprintf("%s/%s.git", strings.TrimSuffix(providerURL, "/"), projectPath)
+		}
+	case "gitlab":
+		// GitLab clone URL format: https://gitlab.com/group/project.git
+		cloneURL = fmt.Sprintf("%s/%s.git", strings.TrimSuffix(providerURL, "/"), projectPath)
+	default:
+		// Default to GitLab format for unknown providers
+		cloneURL = fmt.Sprintf("%s/%s.git", strings.TrimSuffix(providerURL, "/"), projectPath)
+	}
+
 	if dryRun {
 		fmt.Printf("[DRY RUN] Repository not found locally. Would clone %s\n", projectPath)
-		cloneURL := fmt.Sprintf("%s/%s.git", strings.TrimSuffix(gitlabURL, "/"), projectPath)
+		fmt.Printf("[DRY RUN] Clone URL: %s\n", cloneURL)
 		fmt.Printf("[DRY RUN] Clone command: git clone %s %s\n", cloneURL, projectName)
 		fmt.Printf("[DRY RUN] Would clone to: %s\n", projectDir)
 		return projectDir, true, nil // Would be cloned in real mode
 	} else {
 		fmt.Printf("Repository not found locally. Cloning %s...\n", projectPath)
-
-		// Construct clone URL
-		cloneURL := fmt.Sprintf("%s/%s.git", strings.TrimSuffix(gitlabURL, "/"), projectPath)
+		fmt.Printf("Clone URL: %s\n", cloneURL)
 
 		// Clone the repository
 		cmd := exec.Command("git", "clone", cloneURL, projectName)
@@ -266,13 +289,25 @@ func CreateProcessWithCallbackAndGitlab(issueNumber int, processID string, claud
 	return CreateProcessWithCallbackAndGitlabDryRun(issueNumber, processID, claudeCommand, claudeFlags, projectPath, username, gitlabURL, false, completionLabels, onCompletion, customPrompt...)
 }
 
-func CreateProcessWithCallbackAndGitlabDryRun(issueNumber int, processID string, claudeCommand, claudeFlags, projectPath, username, gitlabURL string, dryRun bool, completionLabels []string, onCompletion func(*Process, bool) error, customPrompt ...string) (*Process, error) {
+func CreateProcessWithCallbackAndProviderDryRun(
+	issueNumber int,
+	processID string,
+	claudeCommand,
+	claudeFlags,
+	projectPath,
+	username,
+	providerURL,
+	providerType string,
+	dryRun bool,
+	completionLabels []string,
+	onCompletion func(*Process, bool) error, customPrompt ...string) (*Process, error) {
+
 	if username == "" {
 		username = "user"
 	}
 
 	// Ensure repository exists locally (clone if needed)
-	repoDir, wasCloned, err := ensureRepositoryExists(projectPath, gitlabURL, dryRun)
+	repoDir, wasCloned, err := ensureRepositoryExistsWithProvider(projectPath, providerURL, providerType, dryRun)
 	if err != nil {
 		return nil, fmt.Errorf("failed to ensure repository exists: %v", err)
 	}
@@ -299,18 +334,30 @@ func CreateProcessWithCallbackAndGitlabDryRun(issueNumber int, processID string,
 	if len(customPrompt) > 0 && customPrompt[0] != "" {
 		prompt = customPrompt[0]
 	} else {
-		// Build project context information
-		projectInfo := fmt.Sprintf("- **GitLab Project Path**: `%s`\n- **Your Username**: @%s\n- **Current Working Directory**: `%s`", projectPath, username, workingDir)
+		// Build project context information - provider-agnostic
+		providerLabel := strings.ToUpper(providerType)
+		projectInfo := fmt.Sprintf("- **%s Project Path**: `%s`\n- **Your Username**: @%s\n- **Current Working Directory**: `%s`", providerLabel, projectPath, username, workingDir)
 
 		if moduleName != "" {
 			projectInfo += fmt.Sprintf("\n- **Go Module**: `%s`", moduleName)
 		}
 
-		prompt = fmt.Sprintf(`# Look at issue %d and fix it
-## Project Information
-%s
+		// Build provider-specific MCP instructions
+		mcpInstructions := ""
+		switch strings.ToLower(providerType) {
+		case "github":
+			mcpInstructions = "Always use GitHub MCP for GitHub related tasks."
+		case "gitlab":
+			mcpInstructions = "Always use Gitlab MCP for Gitlab related tasks."
+		default:
+			mcpInstructions = "Always use the appropriate MCP for your provider-specific tasks."
+		}
 
-Always use Gitlab MCP for Gitlab related tasks.
+		prompt = fmt.Sprintf(`# Look at issue %[1]d and fix it
+## Project Information
+%[2]s
+
+%[3]s
 Use git for commit and push.
 
 **Important**: The repository has been verified/cloned and you are now in the project directory.
@@ -324,7 +371,7 @@ T1: 15+ minutes
 ## MANDATORY Workflow - Follow these steps in order:
 
 ### 1. **Retrieve & Analyze Issue** 
-   - Get issue details using GitLab MCP
+   - Get issue details using %[4]s MCP
    - Read the issue description thoroughly
    - Read ALL existing comments on the issue to understand context and any previous attempts
    - Analyze the requirements and acceptance criteria
@@ -337,7 +384,7 @@ T1: 15+ minutes
      - List of files to be modified
      - Step-by-step implementation approach
      - Testing strategy
-   - **POST THIS PLAN AS A COMMENT ON THE GITLAB ISSUE using GitLab MCP**
+   - **POST THIS PLAN AS A COMMENT ON THE %[4]s ISSUE using %[4]s MCP**
    - Format the plan clearly with markdown
 
 ### 3. **Verify Current State**
@@ -345,7 +392,7 @@ T1: 15+ minutes
    - Run 'git pull' to ensure you have the latest changes
 
 ### 4. **Create Branch**
-   - Create a new branch for the issue: `+"`git checkout -b issue-{issue_number}`"+`
+   - Create a new branch for the issue: `+"`git checkout -b issue-%[1]d`"+`
 
 ### 5. **Implement Changes**
    - Follow your posted plan
@@ -353,25 +400,25 @@ T1: 15+ minutes
    - Test changes locally
    - Commit changes with clear commit messages
 
-### 6. **Push & Create MR**
-   - Push branch: `+"`git push -u origin issue-{issue_number}`"+`
-   - Create merge request using GitLab MCP
-   - Reference the issue in the MR description
+### 6. **Push & Create MR/PR**
+   - Push branch: `+"`git push -u origin issue-%[1]d`"+`
+   - Create merge/pull request using %[4]s MCP
+   - Reference the issue in the MR/PR description
 
 ### 7. **Final Update & Human Review**
-   - Comment on the issue with the MR link and completion status
+   - Comment on the issue with the MR/PR link and completion status
    - The issue will be automagically marked as "waiting_human_review"
    - Humans can now review your work and provide feedback
    - If they add comments with feedback, I will automagically resume this session to iterate
 
-**IMPORTANT**: You MUST post your implementation plan to the GitLab issue before making any code changes. This ensures transparency and allows for feedback before implementation begins.
+**IMPORTANT**: You MUST post your implementation plan to the %[4]s issue before making any code changes. This ensures transparency and allows for feedback before implementation begins.
 
 **Human Review Process**: After completion, the issue enters a review phase where:
 - The issue label changes from "picked_up_by_claude" to "waiting_human_review"
 - Humans can review the code, test the changes, and provide feedback
 - Any new comments will automagically trigger a session resume with the feedback context
 - Only when humans are satisfied should they manually change the label to "solved"
-`, issueNumber, projectInfo)
+`, issueNumber, projectInfo, mcpInstructions, providerLabel)
 	}
 
 	// Set up environment first - this is crucial for MCP server initialization
@@ -417,6 +464,11 @@ T1: 15+ minutes
 	}
 
 	return process, nil
+}
+
+func CreateProcessWithCallbackAndGitlabDryRun(issueNumber int, processID string, claudeCommand, claudeFlags, projectPath, username, gitlabURL string, dryRun bool, completionLabels []string, onCompletion func(*Process, bool) error, customPrompt ...string) (*Process, error) {
+	// Use the new provider-agnostic function with GitLab
+	return CreateProcessWithCallbackAndProviderDryRun(issueNumber, processID, claudeCommand, claudeFlags, projectPath, username, gitlabURL, "gitlab", dryRun, completionLabels, onCompletion, customPrompt...)
 }
 
 // cleanupRepositoryState cleans up the repository to prepare it for the next session

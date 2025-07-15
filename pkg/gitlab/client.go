@@ -116,7 +116,7 @@ func (c *Client) TestConnection() error {
 }
 
 func (c *Client) GetAccessibleProjects() ([]Project, error) {
-	body, err := c.makeRequest("/projects?membership=true&per_page=100")
+	body, err := c.makeRequest("/projects?membership=true&per_page=1000")
 	if err != nil {
 		return nil, err
 	}

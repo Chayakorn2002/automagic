@@ -2,8 +2,8 @@ package session
 
 import "time"
 
-// Store defines the interface for session storage
-type Store interface {
+// SessionStore defines the interface for session storage
+type SessionStore interface {
 	AddCompletedSession(issueIID int, sessionID, projectPath string, completionTime time.Time, workingDir, claudeCommand, claudeFlags string, envVars map[string]string) error
 	UpdateLastCommentTime(issueIID int, commentTime time.Time) error
 	GetCompletedSession(issueIID int) (*CompletedSession, bool)
@@ -12,12 +12,12 @@ type Store interface {
 	RemoveSession(issueIID int) error
 }
 
-// Load method for backward compatibility with JSON store
+// Load method for backward compatibility with session store
 type Loadable interface {
 	Load() error
 }
 
-// Save method for backward compatibility with JSON store  
+// Save method for backward compatibility with session store
 type Saveable interface {
 	Save() error
 }

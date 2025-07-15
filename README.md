@@ -1,6 +1,6 @@
-# automagic - GitLab Issue Automation with Claude AI
+# automagic - Multi-Provider Issue Automation with Claude AI
 
-automagic is a powerful daemon that automates GitLab issue processing using Claude AI. It monitors GitLab issues with specific labels and automagically creates implementation plans, code changes, and merge requests.
+automagic is a powerful daemon that automates issue processing using Claude AI. It supports both **GitLab** and **GitHub**, monitoring issues with specific labels and automagically creating implementation plans, code changes, and merge/pull requests.
 
 ## 🚀 Quick Start
 
@@ -16,16 +16,21 @@ go install github.com/bilbo290/automagic@latest
 
 1. **Go 1.19+** - [Install Go](https://golang.org/doc/install)
 2. **Claude CLI** - [Install Claude](https://docs.anthropic.com/en/docs/claude-code)
-3. **GitLab Account** with API access
-4. **GitLab Personal Access Token** with appropriate permissions
+3. **Provider Account** - GitLab or GitHub account with API access
+4. **Personal Access Token** with appropriate permissions
 
-### Required GitLab Token Permissions
+### Required Token Permissions
 
-Your GitLab Personal Access Token needs the following scopes:
+#### GitLab Personal Access Token
 - `api` - Full access to the API
-- `read_user` - Read user information
+- `read_user` - Read user information  
 - `read_repository` - Read repository data
 - `write_repository` - Write repository data (for creating branches, commits)
+
+#### GitHub Personal Access Token
+- `repo` - Full control of private repositories
+- `issues` - Read and write access to issues
+- `pull_requests` - Read and write access to pull requests
 
 ## 📋 Configuration
 
@@ -35,12 +40,30 @@ automagic uses environment variables for all configuration. You can set them dir
 
 #### Option 1: Direct Environment Variables
 
+**For GitLab:**
 ```bash
 export GITLAB_URL="https://gitlab.com"
 export GITLAB_TOKEN="glpat-your-token-here"
 export GITLAB_USERNAME="your-gitlab-username"
 export CLAUDE_COMMAND="claude"
 export CLAUDE_FLAGS="--dangerously-skip-permissions --output-format stream-json --verbose"
+```
+
+**For GitHub:**
+```bash
+export GITHUB_URL="https://api.github.com"
+export GITHUB_TOKEN="ghp_your-token-here"
+export GITHUB_USERNAME="your-github-username"
+export CLAUDE_COMMAND="claude"
+export CLAUDE_FLAGS="--dangerously-skip-permissions --output-format stream-json --verbose"
+```
+
+**Generic Provider Configuration (Alternative):**
+```bash
+export PROVIDER_TYPE="github"  # or "gitlab"
+export PROVIDER_URL="https://api.github.com"  # or "https://gitlab.com"
+export PROVIDER_TOKEN="ghp_your-token-here"
+export PROVIDER_USERNAME="your-username"
 ```
 
 #### Option 2: .env File (Recommended)
@@ -51,26 +74,49 @@ Generate a template configuration file:
 automagic -generate-config
 ```
 
-Then edit the generated `.env` file:
+Then edit the generated `.env` file to configure your preferred provider:
 
 ```bash
-# automagic GitLab Automation Configuration
-GITLAB_URL=https://gitlab.com
-GITLAB_TOKEN=glpat-your-token-here
-GITLAB_USERNAME=your-gitlab-username
+# automagic Multi-Provider Automation Configuration
 
+# Choose ONE provider approach:
+
+# Option 1: GitHub Configuration (auto-detected)
+GITHUB_URL=https://api.github.com
+GITHUB_TOKEN=ghp_your-token-here
+GITHUB_USERNAME=your-github-username
+
+# Option 2: GitLab Configuration (auto-detected)
+# GITLAB_URL=https://gitlab.com
+# GITLAB_TOKEN=glpat-your-token-here
+# GITLAB_USERNAME=your-gitlab-username
+
+# Option 3: Generic Provider Configuration
+# PROVIDER_TYPE=github
+# PROVIDER_URL=https://api.github.com
+# PROVIDER_TOKEN=ghp_your-token-here
+# PROVIDER_USERNAME=your-username
+
+# Claude Configuration
 CLAUDE_COMMAND=claude
 CLAUDE_FLAGS="--dangerously-skip-permissions --output-format stream-json --verbose"
 
-# Optional: Set default project (will be set via interactive mode)
+# Project Configuration (Optional - set via interactive mode)
 DEFAULT_PROJECT_PATH=
 
-# Optional: Customize daemon behavior
+# Daemon Configuration (Optional)
 DAEMON_INTERVAL=10
 CLAUDE_LABEL=claude
 PROCESS_LABEL=picked_up_by_claude
 REVIEW_LABEL=waiting_human_review
 ```
+
+#### Provider Auto-Detection
+
+automagic automatically detects your provider based on which token is configured:
+- If `GITHUB_TOKEN` is set → GitHub provider
+- If `GITLAB_TOKEN` is set → GitLab provider  
+- `PROVIDER_TYPE` overrides auto-detection
 
 ## 🎯 Usage Modes
 
@@ -83,7 +129,7 @@ automagic -interactive
 ```
 
 This will:
-1. List your accessible GitLab projects
+1. List your accessible projects (GitLab or GitHub)
 2. Let you select a project to monitor
 3. Save the selection to `.env` file
 4. Optionally process an issue immediately
@@ -128,24 +174,139 @@ automagic -issue 123 -semi-dry-run
 
 ### Utility Commands
 
+#### Project Management
+
 ```bash
-# List accessible projects
+# List organizations/groups you belong to
+automagic -list-orgs
+
+# List accessible projects (with interactive organization selection)
 automagic -list-projects
 
-# Search for projects
-automagic -search "backend"
+# Filter projects by keyword
+automagic -list-projects -keyword "backend"
 
+# Filter projects by visibility
+automagic -list-projects -visibility "public"
+
+# Combine filters
+automagic -list-projects -keyword "api" -visibility "private"
+
+# Search for projects by name (simple search)
+automagic -search "backend"
+```
+
+#### Issue Management
+
+```bash
 # List issues in selected project
 automagic -list-issues
 
 # List issues with specific label
 automagic -list-issues -label "claude"
 
-# Test label filtering
+# Test label filtering functionality
 automagic -test-labels
+```
 
-# Debug GitLab MCP integration
+#### Debugging and Development
+
+```bash
+# Debug provider MCP integration (GitLab/GitHub)
 automagic -debug-mcp
+```
+
+### 🔍 Enhanced Project Listing
+
+automagic provides powerful project discovery and filtering capabilities for both GitHub and GitLab:
+
+#### Interactive Organization Selection
+
+When you run `automagic -list-projects`, you'll get an interactive prompt to select organizations:
+
+```
+Select organizations to include (or press Enter for all):
+0. [Personal] your-username (your personal repositories)
+1. [Org] company-org (Company Organization)
+2. [Org] open-source-org (Open Source Projects)
+3. All organizations
+
+Enter organization numbers separated by commas (e.g., 0,1,3) or 'all':
+```
+
+**Selection Options:**
+- **Single numbers**: `0` (personal only), `1` (specific org)
+- **Multiple selections**: `0,1,3` (personal + two orgs)
+- **All organizations**: Press Enter or type `all`
+- **Flexible input**: Comma-separated, spaces ignored
+
+#### Advanced Filtering
+
+**Keyword Filtering** - Searches across:
+- Repository/project name
+- Full path (owner/repo)
+- Description text
+
+```bash
+# Find all projects related to "api"
+automagic -list-projects -keyword "api"
+
+# Case-insensitive search
+automagic -list-projects -keyword "BACKEND"
+```
+
+**Visibility Filtering:**
+```bash
+# Show only public repositories
+automagic -list-projects -visibility "public"
+
+# Show only private repositories  
+automagic -list-projects -visibility "private"
+
+# GitLab also supports "internal"
+automagic -list-projects -visibility "internal"
+```
+
+**Combined Filtering:**
+```bash
+# Find public APIs
+automagic -list-projects -keyword "api" -visibility "public"
+
+# Private backend services
+automagic -list-projects -keyword "backend" -visibility "private"
+```
+
+#### Provider-Specific Features
+
+**GitHub:**
+- Fetches repositories from personal account and all organizations
+- Supports private/public repository filtering
+- Includes repository descriptions and last activity dates
+- Handles organization membership automatically
+
+**GitLab:**
+- Fetches projects from accessible groups and personal namespace
+- Supports public/private/internal project filtering
+- Group-based filtering using project path prefixes
+- Compatible with self-hosted GitLab instances
+
+#### Output Format
+
+Results show comprehensive project information:
+```
+=== Project Listing Results ===
+Organizations: your-username, company-org
+Keyword filter: api
+Visibility filter: public
+
+Found 12 projects:
+
+Name: backend-api
+Path: company-org/backend-api
+Description: REST API for the main application
+Visibility: public
+URL: https://github.com/company-org/backend-api
+Last Activity: 2025-07-13T15:30:22Z
 ```
 
 ## 🏷️ Label Workflow
@@ -161,7 +322,7 @@ graph LR
     C --> D[Claude processes issue]
 ```
 
-**To start:** Add the `claude` label to any GitLab issue.
+**To start:** Add the `claude` label to any GitLab issue or GitHub issue.
 
 ### 2. Processing: `picked_up_by_claude` Label
 
@@ -170,7 +331,7 @@ While automagic is processing:
 - Claude analyzes the issue and existing comments
 - Creates implementation plan and posts as comment
 - Implements the solution
-- Creates merge request
+- Creates merge request (GitLab) or pull request (GitHub)
 - Updates issue with completion status
 
 ### 3. Human Review: `waiting_human_review` Label
@@ -186,7 +347,7 @@ graph LR
 
 After Claude completes:
 - Issue is labeled `waiting_human_review`
-- Humans review the merge request and implementation
+- Humans review the merge/pull request and implementation
 - Add comments with feedback, questions, or requests
 - automagic automagically detects human comments and re-engages Claude
 
@@ -233,10 +394,13 @@ your-project/
 
 ### Common Issues
 
-**1. "GitLab connection test failed"**
+**1. "Provider connection test failed"**
 ```bash
-# Check your token and URL
+# Check your token and URL configuration
 automagic -list-projects
+
+# List organizations to verify access
+automagic -list-orgs
 ```
 
 **2. "No project configured"**
@@ -253,8 +417,14 @@ which claude
 ```
 
 **4. "Permission denied" errors**
+
+For **GitLab**:
 - Check GitLab token permissions
 - Ensure token has `api` and `write_repository` scopes
+
+For **GitHub**:
+- Check GitHub token permissions  
+- Ensure token has `repo`, `issues`, and `pull_requests` scopes
 
 ### Debug Mode
 
@@ -287,9 +457,9 @@ automagic --daemon 2>&1 | tee automagic.log
 4. **Claude analyzes**: Reads issue description and existing comments
 5. **Claude plans**: Posts implementation plan as comment
 6. **Claude implements**: Creates branch, writes code, commits changes
-7. **Claude delivers**: Creates merge request, updates issue
+7. **Claude delivers**: Creates merge request (GitLab) or pull request (GitHub), updates issue
 8. **System updates**: Label changes to `waiting_human_review`
-9. **Human reviews**: Checks MR, tests locally, adds feedback comment
+9. **Human reviews**: Checks MR/PR, tests locally, adds feedback comment
 10. **automagic re-engages**: Detects human comment, changes label back to `picked_up_by_claude`
 11. **Claude iterates**: Addresses feedback, updates implementation
 12. **Loop continues**: Until human is satisfied and marks as `solved`
@@ -300,7 +470,7 @@ automagic --daemon 2>&1 | tee automagic.log
 2. **Add label**: `claude`
 3. **Claude**: Investigates code, identifies validation logic issue
 4. **Claude**: Posts analysis and fix plan as comment
-5. **Claude**: Implements fix, adds tests, creates MR
+5. **Claude**: Implements fix, adds tests, creates MR/PR
 6. **Human**: Reviews, requests additional test cases
 7. **Claude**: Adds more comprehensive tests
 8. **Human**: Approves and merges, marks `solved`
@@ -350,20 +520,21 @@ When reviewing Claude's work:
 
 - Keep your repositories clean and up-to-date
 - Use meaningful branch names (automagic creates `issue-{number}` branches)
-- Review and merge automagic's MRs promptly to avoid conflicts
+- Review and merge automagic's MRs/PRs promptly to avoid conflicts
 
 ## 🔒 Security Considerations
 
-- Store GitLab tokens securely (use environment variables in production)
+- Store access tokens securely (use environment variables in production)
 - Review all code changes before merging
-- Use appropriate GitLab project permissions
+- Use appropriate repository permissions (GitLab project permissions or GitHub repository permissions)
 - Consider running automagic in a isolated environment for production use
 
 ## 📚 Additional Resources
 
 - [Claude Code Documentation](https://docs.anthropic.com/en/docs/claude-code)
 - [GitLab API Documentation](https://docs.gitlab.com/ee/api/)
-- [automagic GitHub Repository](https://github.com/your-username/automagic)
+- [GitHub API Documentation](https://docs.github.com/en/rest)
+- [automagic GitHub Repository](https://github.com/bilbo290/automagic)
 
 ## 🤝 Contributing
 

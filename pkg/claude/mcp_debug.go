@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/bilbo290/automagic/pkg/config"
-	"github.com/bilbo290/automagic/pkg/gitlab"
+	"github.com/bilbo290/automagic/pkg/provider"
 )
 
 type MCPDebugInfo struct {
@@ -75,8 +75,13 @@ ERROR_MESSAGES: any errors`
 	return debug, nil
 }
 
-func TestGitLabMCPIntegration(cfg *config.Config, gitlabClient *gitlab.Client, projectPath string) error {
-	fmt.Printf("=== Testing GitLab MCP Integration ===\n\n")
+func TestProviderMCPIntegration(cfg *config.Config, providerInstance provider.Provider, projectPath string) error {
+	providerType := "GitLab"
+	if cfg.IsGitHub() {
+		providerType = "GitHub"
+	}
+
+	fmt.Printf("=== Testing %s MCP Integration ===\n\n", providerType)
 
 	// Test 1: Check MCP availability
 	fmt.Printf("Step 1: Testing MCP availability...\n")
@@ -86,7 +91,7 @@ func TestGitLabMCPIntegration(cfg *config.Config, gitlabClient *gitlab.Client, p
 	}
 
 	fmt.Printf("MCP Available: %v\n", mcpDebug.MCPAvailable)
-	fmt.Printf("GitLab MCP Working: %v\n", mcpDebug.GitLabMCPWorking)
+	fmt.Printf("%s MCP Working: %v\n", providerType, mcpDebug.GitLabMCPWorking)
 	fmt.Printf("Available Tools: %v\n", mcpDebug.AvailableTools)
 
 	if len(mcpDebug.ErrorMessages) > 0 {
@@ -96,32 +101,32 @@ func TestGitLabMCPIntegration(cfg *config.Config, gitlabClient *gitlab.Client, p
 		}
 	}
 
-	// Test 2: If MCP is available, test GitLab-specific operations
+	// Test 2: If MCP is available, test provider-specific operations
 	if mcpDebug.MCPAvailable {
-		fmt.Printf("\nStep 2: Testing GitLab MCP operations...\n")
+		fmt.Printf("\nStep 2: Testing %s MCP operations...\n", providerType)
 
-		gitlabTestPrompt := fmt.Sprintf(`You have access to GitLab MCP tools. Please test the following operations:
+		providerTestPrompt := fmt.Sprintf(`You have access to %s MCP tools. Please test the following operations:
 
 1. Try to get project information for: %s
 2. Try to list issues for the project
 3. Try to get user information
 
-Please use the actual GitLab MCP tools if available. If you encounter any errors, please describe them in detail.
+Please use the actual %s MCP tools if available. If you encounter any errors, please describe them in detail.
 
 Project path: %s
-GitLab URL: %s
+Provider URL: %s
 
 Please respond with detailed information about:
-- Which GitLab MCP tools worked
+- Which %s MCP tools worked
 - Any errors encountered
 - The actual data returned (if any)
-`, projectPath, projectPath, cfg.GitLab.URL)
+`, providerType, projectPath, providerType, projectPath, cfg.ProviderURL, providerType)
 
-		gitlabResult, err := runClaudeCommand(gitlabTestPrompt, cfg)
+		providerResult, err := runClaudeCommand(providerTestPrompt, cfg)
 		if err != nil {
-			fmt.Printf("Error testing GitLab MCP: %v\n", err)
+			fmt.Printf("Error testing %s MCP: %v\n", providerType, err)
 		} else {
-			fmt.Printf("GitLab MCP Test Results:\n%s\n", gitlabResult)
+			fmt.Printf("%s MCP Test Results:\n%s\n", providerType, providerResult)
 		}
 	}
 
@@ -130,7 +135,7 @@ Please respond with detailed information about:
 
 	// Get project info via direct API
 	fmt.Printf("Direct API - Project info: ")
-	projects, err := gitlabClient.GetAccessibleProjects()
+	projects, err := providerInstance.GetAccessibleProjects()
 	if err != nil {
 		fmt.Printf("Failed: %v\n", err)
 	} else {
@@ -145,7 +150,7 @@ Please respond with detailed information about:
 
 	// Get issues via direct API
 	fmt.Printf("Direct API - Issues: ")
-	issues, err := gitlabClient.GetProjectIssues(projectPath, []string{}, "opened")
+	issues, err := providerInstance.GetProjectIssues(projectPath, []string{}, "opened")
 	if err != nil {
 		fmt.Printf("Failed: %v\n", err)
 	} else {
@@ -173,7 +178,7 @@ func runClaudeCommand(prompt string, cfg *config.Config) (string, error) {
 	}
 
 	// Create a more focused command for MCP testing
-	claudeCmd := fmt.Sprintf("%s %s -p %q", cfg.Claude.Command, cfg.Claude.Flags, prompt)
+	claudeCmd := fmt.Sprintf("%s %s -p %q", cfg.ClaudeCommand, cfg.ClaudeFlags, prompt)
 	fmt.Printf("Debug: Running command: %s\n", claudeCmd)
 	fmt.Printf("Debug: Working directory: %s\n", homeDir)
 
@@ -238,20 +243,22 @@ func runClaudeCommand(prompt string, cfg *config.Config) (string, error) {
 func CreateMCPDebugProcess(issueNumber int, cfg *config.Config, projectPath string) (*Process, error) {
 	processID := fmt.Sprintf("mcp-debug-%d-%d", issueNumber, time.Now().Unix())
 
-	prompt := fmt.Sprintf(`# MCP Debug Session for Issue #%d
+	providerType := cfg.ProviderType
+
+	prompt := fmt.Sprintf(`# MCP Debug Session for Issue #%[1]d
 
 ## Debug Task
-Please help debug GitLab MCP integration for issue #%d in project %s.
+Please help debug %[2]s MCP integration for issue #%[1]d in project %[3]s.
 
 ## Debug Steps:
 1. **Check MCP Availability**: 
    - List all available MCP tools
-   - Specifically check for GitLab MCP tools
+   - Specifically check for %[2]s MCP tools
 
-2. **Test GitLab MCP Functions**:
-   - Try to connect to GitLab: %s
-   - Try to get project info for: %s
-   - Try to get issue #%d details
+2. **Test %[2]s MCP Functions**:
+   - Try to connect to %[2]s: %[4]s
+   - Try to get project info for: %[3]s
+   - Try to get issue #%[1]d details
    - Try to list project issues
 
 3. **Detailed Error Reporting**:
@@ -264,21 +271,21 @@ Please help debug GitLab MCP integration for issue #%d in project %s.
    - Show how to use standard git/curl commands as fallback
 
 ## Configuration
-- GitLab URL: %s
-- Project: %s
-- Issue: #%d
-- Username: @%s
+- %[2]s URL: %[4]s
+- Project: %[3]s
+- Issue: #%[1]d
+- Username: @%[5]s
 
 Please provide detailed debugging information and suggest solutions.
-`, issueNumber, issueNumber, projectPath, cfg.GitLab.URL, projectPath, issueNumber, cfg.GitLab.URL, projectPath, issueNumber, cfg.GitLab.Username)
+`, issueNumber, providerType, projectPath, cfg.ProviderURL, cfg.ProviderUsername)
 
 	return CreateProcess(
 		issueNumber,
 		processID,
-		cfg.Claude.Command,
-		cfg.Claude.Flags,
+		cfg.ClaudeCommand,
+		cfg.ClaudeFlags,
 		projectPath,
-		cfg.GitLab.Username,
+		cfg.ProviderUsername,
 		prompt,
 	)
 }

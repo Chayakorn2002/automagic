@@ -18,7 +18,7 @@ type SQLiteSessionStore struct {
 }
 
 // Ensure SQLiteSessionStore implements the Store interface
-var _ Store = (*SQLiteSessionStore)(nil)
+var _ SessionStore = (*SQLiteSessionStore)(nil)
 
 // NewSQLiteSessionStore creates a new SQLite-based session store
 func NewSQLiteSessionStore(dataDir string) (*SQLiteSessionStore, error) {
@@ -55,7 +55,11 @@ func (s *SQLiteSessionStore) createTables() error {
 		session_id TEXT NOT NULL,
 		project_path TEXT NOT NULL,
 		completion_time INTEGER NOT NULL,
-		last_comment_time INTEGER
+		last_comment_time INTEGER,
+		working_dir TEXT,
+		claude_command TEXT,
+		claude_flags TEXT,
+		env_vars TEXT
 	);
 	`
 
@@ -63,23 +67,13 @@ func (s *SQLiteSessionStore) createTables() error {
 		return err
 	}
 
-	// Now add the new columns if they don't exist (migration)
-	migrationQueries := []string{
-		`ALTER TABLE completed_sessions ADD COLUMN working_dir TEXT`,
-		`ALTER TABLE completed_sessions ADD COLUMN claude_command TEXT`,
-		`ALTER TABLE completed_sessions ADD COLUMN claude_flags TEXT`,
-		`ALTER TABLE completed_sessions ADD COLUMN env_vars TEXT`,
-	}
-
-	for _, query := range migrationQueries {
-		// These will fail if columns already exist, which is expected
-		s.db.Exec(query)
-	}
-
 	// Create index
 	indexQuery := `CREATE INDEX IF NOT EXISTS idx_completion_time ON completed_sessions(completion_time);`
-	_, err := s.db.Exec(indexQuery)
-	return err
+	if _, err := s.db.Exec(indexQuery); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // AddCompletedSession stores information about a completed session
@@ -399,35 +393,4 @@ func (s *SQLiteSessionStore) CleanupOldSessions(maxAge time.Duration) error {
 // Close closes the database connection
 func (s *SQLiteSessionStore) Close() error {
 	return s.db.Close()
-}
-
-// MigrateFromJSONStore migrates data from the old JSON-based store
-func (s *SQLiteSessionStore) MigrateFromJSONStore(jsonStore *SessionStore) error {
-	sessions := jsonStore.GetCompletedSessions()
-
-	for _, session := range sessions {
-		// For migrated sessions, use empty values for new fields since they weren't stored in JSON
-		err := s.AddCompletedSession(
-			session.IssueIID,
-			session.SessionID,
-			session.ProjectPath,
-			session.CompletionTime,
-			session.WorkingDir,    // Will be empty string for old sessions
-			session.ClaudeCommand, // Will be empty string for old sessions
-			session.ClaudeFlags,   // Will be empty string for old sessions
-			session.EnvVars,       // Will be nil for old sessions
-		)
-		if err != nil {
-			return fmt.Errorf("failed to migrate session %d: %v", session.IssueIID, err)
-		}
-
-		if session.LastCommentTime != nil {
-			err = s.UpdateLastCommentTime(session.IssueIID, *session.LastCommentTime)
-			if err != nil {
-				return fmt.Errorf("failed to migrate last comment time for session %d: %v", session.IssueIID, err)
-			}
-		}
-	}
-
-	return nil
 }
